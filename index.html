@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Moran New York - Towage Cost Simulation</title>
+    <link rel="stylesheet" href="tug_grt_drop_mrn.css">
+</head>
+
+<body>
+
+    <div class="header">
+        <h1>Moran New York<br>Towage Cost Simulator</h1>
+        <p>Simulation & Parameter Analysis</p>
+        
+        <div style="margin-top: 15px; margin-bottom: 5px; display: inline-block; background: #e6f0fa; border: 1px solid var(--accent-light); padding: 8px 16px; border-radius: 20px; font-size: 0.9rem; font-weight: 700; color: var(--accent);">
+            Drop Invoice &rarr; See Audit &rarr; See Ranges &rarr; Tinker with the Simulator if needed
+        </div>
+
+        <p style="margin-top: 10px;">
+            <a href="https://github.com/masa2050-rgb/ny-towage-calculation" target="_blank"
+                style="color: var(--accent); font-size: 0.9rem; text-decoration: none; font-weight: 600;">
+                View Source on GitHub ↗
+            </a>
+        </p>
+    </div>
+
+    <section class="methodology" style="margin-bottom: 3rem; margin-top: 1rem;">
+        <h2 class="section-label">Invoice Auditor (Drag & Drop)</h2>
+        <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 1.5rem;">
+            Upload a Moran New York towage invoice to automatically compare its cost components against your current simulator baseline. 
+        </p>
+
+        <div class="dropzone" id="invoiceDropzone">
+            <div class="dropzone-content">
+                <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--accent-light); margin-bottom: 1rem;">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                    <polyline points="17 8 12 3 7 8"></polyline>
+                    <line x1="12" y1="3" x2="12" y2="15"></line>
+                </svg>
+                <h3>Drag & Drop Invoice Here</h3>
+                <p>Supports .PDF</p>
+                <button type="button" class="preset-chip" style="margin-top: 1rem; font-size: 0.8rem;" onclick="document.getElementById('fileInput').click()">Browse Files</button>
+                <input type="file" id="fileInput" style="display: none;" accept=".pdf">
+            </div>
+        </div>
+
+        <div id="auditResultsContainer" style="display: none; margin-top: 2rem;">
+            <div id="auditResultsGrid" class="assumptions-grid">
+            </div>
+        </div>
+    </section>
+
+    <section class="methodology" style="margin-bottom: 3rem;">
+        <h2 class="section-label">Cost Component Ranges</h2>
+        <div class="range-chart-container">
+            <div class="breakdown-grid" id="dynamic-ranges-container">
+            </div>
+
+            <div class="range-legend" style="margin-top: 1.5rem;">
+                <div class="legend-item"><span class="legend-color"></span> Data-Set Range (±1 Step)</div>
+                <div class="legend-item"><span class="legend-dot"></span> Median Point</div>
+                <div class="legend-item"><span style="width: 4px; height: 12px; background: var(--warning); display: inline-block; border-radius: 2px;"></span> ±7% Sub-Range</div>
+            </div>
+        </div>
+    </section>
+
+    <section class="methodology" style="margin-bottom: 1rem;">
+        <h2 class="section-label">Simulator</h2>
+    </section>
+    
+    <div class="container">
+        <div class="panel panel-far-left">
+            <h2 class="section-title">BASELINE</h2>
+
+            <div class="input-group">
+                <div class="input-header"><span>Region</span></div>
+                <select id="region" onchange="handleRegionChange()">
+                    <option value="nynj" selected>New York / New Jersey</option>
+                    <option value="norfolk">Norfolk, VA</option>
+                    <option value="charleston">Charleston, SC</option>
+                    <option value="savannah">Savannah, GA</option>
+                    <option value="miami">Miami, FL</option>
+                    <option value="neworleans">New Orleans, LA</option>
+                </select>
+            </div>
+
+            <div class="input-group">
+                <div class="input-header"><span>Terminal</span></div>
+                <select id="destination" onchange="handleRoutingChange(true, 'destination')">
+                    <option value="bayonne" selected>Port Liberty Bayonne (USNYC01)</option>
+                    <option value="newyork">Port Liberty New York (USNYC02)</option>
+                    <option value="elizabeth">APM Elizabeth (USNYC06)</option>
+                    <option value="none" style="display:none;">Not Applicable (Outside NY/NJ)</option>
+                </select>
+                <div id="routeDetail" style="margin-top:0.5rem; font-style:italic; color: #333;">Path: Newark Bay &rarr;
+                    Bayonne (Zones 8 &amp; 9)</div>
+            </div>
+
+            <div class="input-group">
+                <div class="input-header"><span>Direction</span></div>
+                <select id="direction" onchange="handleRoutingChange(false)">
+                    <option value="inbound" selected>Inbound (Arrival / Docking)</option>
+                    <option value="outbound">Outbound (Departure / Undocking)</option>
+                </select>
+            </div>
+
+            <div class="slider-group">
+                <div class="slider-header">
+                    <span class="slider-title">Gross Tonnage (GRT)</span>
+                    <span class="slider-value" id="grt-val">120,000</span>
+                </div>
+                <input type="range" id="grt" min="5000" max="160000" step="1000" value="120000" oninput="updateModel()">
+                <div class="slider-ticks">
+                    <span style="left: 0%">5k</span>
+                    <span style="left: 25.8%">45k (ULCV)</span>
+                    <span style="left: 74.19%">120k (SLCV)</span>
+                    <span style="left: 100%">160k</span>
+                </div>
+            </div>
+
+            <div class="slider-group">
+                <div class="slider-header">
+                    <span class="slider-title">Net Register Tonnage (NRT)</span>
+                    <span class="slider-value" id="nrt-val">50,000</span>
+                </div>
+                <input type="range" id="nrt" min="0" max="150000" step="1000" value="50000" oninput="updateModel()">
+                <div class="slider-ticks">
+                    <span style="left: 0%">0</span>
+                    <span style="left: 35%">40k (Fee Threshold)</span>
+                    <span style="left: 100%">150k</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="panel panel-center-left">
+            <h2 class="section-title">RATES</h2>
+
+            <div class="slider-group">
+                <div class="slider-header">
+                    <span class="slider-title">Docking Rate ($/tug)</span>
+                    <span class="slider-value" id="year-rate-val">$2,150</span>
+                </div>
+                <input type="range" id="yearRate" min="1000" max="4000" step="25" value="2150" oninput="updateModel()">
+                <div class="slider-ticks">
+                    <span style="left: 0%">$1,000</span>
+                    <span style="left: 38.33%">$2,150 (2026)</span>
+                    <span style="left: 100%">$4,000</span>
+                </div>
+            </div>
+
+            <div class="slider-group">
+                <div class="slider-header">
+                    <span class="slider-title">Escort Hourly Rate ($/hr)</span>
+                    <span class="slider-value" id="escort-rate-val">$1,000/hr</span>
+                </div>
+                <input type="range" id="escortRate" min="0" max="2500" step="1" value="1000" oninput="updateModel()">
+                <div class="slider-ticks">
+                    <span style="left: 0%">$0</span>
+                    <span style="left: 40%">$1k</span>
+                    <span style="left: 100%">$2.5k</span>
+                </div>
+            </div>
+
+            <div class="slider-group">
+                <div class="slider-header">
+                    <span class="slider-title">Market Fuel Price ($/gallon)</span>
+                    <span class="slider-value" id="fuel-val">$2.69</span>
+                </div>
+                <input type="range" id="fuel" min="2.00" max="5.00" step="0.01" value="2.69" oninput="updateModel()">
+                <div class="slider-ticks">
+                    <span style="left: 0%">$2.00</span>
+                    <span style="left: 22.999%">$2.69</span>
+                    <span style="left: 50%">$3.50</span>
+                    <span style="left: 100%">$5.00</span>
+                </div>
+                <div class="caption" style="font-size:0.85rem; color:#666; margin-top:0.5rem;">Source: New York Harbor
+                    Ultra-Low Sulfur No 2 Diesel Spot Price (I:NYHULSN2).</div>
+                <div class="preset-chips" style="margin-top: 0.5rem;">
+                    <button type="button" class="preset-chip"
+                        onclick="window.open('https://ycharts.com/indicators/new_york_harbor_ultra_low_sulfur_no_2_diesel_spot_price', '_blank')">Check
+                        Current Spot Price</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="panel panel-center-right">
+            <div class="section-title">Financial Output</div>
+
+            <div class="output-header">
+                <div class="output-total-label">Total Tug Invoice</div>
+                <div class="output-total-val" id="totalCost">$0.00</div>
+            </div>
+
+            <div id="tugBreakdownContainer"></div>
+
+            <div id="runtimeHint" style="font-size:0.85rem; font-weight: 500; margin-top:1rem; min-height:1.1em;">
+            </div>
+        </div>
+
+        <div class="panel panel-far-right">
+            <div class="section-title">Variables</div>
+
+            <div class="sys-param-row" style="align-items: center;">
+                <span title="Manually adjust the calculated amount of Docking Line Items">Docking Only</span>
+                <div class="stepper">
+                    <button type="button" class="stepper-btn" onclick="stepValue('adjDocking', -1)">&minus;</button>
+                    <span class="stepper-val" id="adjDocking-display">0</span>
+                    <input type="hidden" id="adjDocking" value="0">
+                    <button type="button" class="stepper-btn" onclick="stepValue('adjDocking', 1)">+</button>
+                </div>
+            </div>
+            <div class="sys-param-row" style="align-items: center;">
+                <span title="Manually adjust the calculated amount of Escort + Docking Line Items">Escort + Docking</span>
+                <div class="stepper">
+                    <button type="button" class="stepper-btn" onclick="stepValue('adjEscortDock', -1)">&minus;</button>
+                    <span class="stepper-val" id="adjEscortDock-display">0</span>
+                    <input type="hidden" id="adjEscortDock" value="0">
+                    <button type="button" class="stepper-btn" onclick="stepValue('adjEscortDock', 1)">+</button>
+                </div>
+            </div>
+            <div class="sys-param-row" style="align-items: center;">
+                <span title="Manually adjust the calculated amount of Escort Only Line Items">Escort Only</span>
+                <div class="stepper">
+                    <button type="button" class="stepper-btn" onclick="stepValue('adjEscortOnly', -1)">&minus;</button>
+                    <span class="stepper-val" id="adjEscortOnly-display">0</span>
+                    <input type="hidden" id="adjEscortOnly" value="0">
+                    <button type="button" class="stepper-btn" onclick="stepValue('adjEscortOnly', 1)">+</button>
+                </div>
+            </div>
+
+            <div class="sys-param-row" style="align-items: center;">
+                <span title="Input the actual escort time for standard escort+docking tugs">Actual Escort Time
+                    (hrs)</span>
+                <div class="stepper">
+                    <button type="button" class="stepper-btn" onclick="stepTimeValue('adjTime', -0.25)">&minus;</button>
+                    <span class="stepper-val" id="adjTime-display" style="min-width: 2.5rem;">0.50</span>
+                    <input type="hidden" id="adjTime" value="0.5">
+                    <button type="button" class="stepper-btn" onclick="stepTimeValue('adjTime', 0.25)">+</button>
+                </div>
+            </div>
+            
+            <div class="sys-param-row" style="align-items: center; padding-left: 1rem; border-left: none;">
+                <span title="Adjust the baseline runtime (Zone Time) for escort+docking tugs">↳ Plus Runtimes</span>
+                <div class="stepper">
+                    <button type="button" class="stepper-btn" onclick="stepTimeValue('adjRuntime', -0.25)">&minus;</button>
+                    <span class="stepper-val" id="adjRuntime-display" style="min-width: 2.5rem;">1.25</span>
+                    <input type="hidden" id="adjRuntime" value="1.25">
+                    <button type="button" class="stepper-btn" onclick="stepTimeValue('adjRuntime', 0.25)">+</button>
+                </div>
+            </div>
+
+            <div class="sys-param-row" style="align-items: center; margin-top: 1rem;">
+                <span title="Input the actual escort time specifically for Escort Only tugs">Actual Escort Only Time (hrs)</span>
+                <div class="stepper">
+                    <button type="button" class="stepper-btn" onclick="stepTimeValue('adjTimeOnly', -0.25)">&minus;</button>
+                    <span class="stepper-val" id="adjTimeOnly-display" style="min-width: 2.5rem;">0.50</span>
+                    <input type="hidden" id="adjTimeOnly" value="0.5">
+                    <button type="button" class="stepper-btn" onclick="stepTimeValue('adjTimeOnly', 0.25)">+</button>
+                </div>
+            </div>
+
+            <div class="sys-param-row" style="align-items: center; padding-left: 1rem; border-left: none;">
+                <span title="Adjust the baseline runtime (Zone Time) for Escort Only tugs">↳ Plus Runtimes</span>
+                <div class="stepper">
+                    <button type="button" class="stepper-btn" onclick="stepTimeValue('adjRuntimeOnly', -0.25)">&minus;</button>
+                    <span class="stepper-val" id="adjRuntimeOnly-display" style="min-width: 2.5rem;">2.50</span>
+                    <input type="hidden" id="adjRuntimeOnly" value="2.50">
+                    <button type="button" class="stepper-btn" onclick="stepTimeValue('adjRuntimeOnly', 0.25)">+</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <section class="methodology" style="margin-bottom: 2rem;">
+        <h2 class="section-label">Baseline Assumptions</h2>
+        <div class="assumptions-grid">
+            <div class="assumption-block">
+                <h3>Terminal</h3>
+                <p><strong>Drives:</strong> Actual Escort Time and Runtime</p>
+                <p><strong>Assumption:</strong></p>
+                <ul style="margin-top: 0.5rem; padding-left: 1.2rem;">
+                    <li><strong>Port Liberty Bayonne:</strong> Sets Actual Escort Time to 0.50 hrs and base Zone Runtime to 2.50 hrs (always reduces to 1.25 hrs as it is waived for both directions).</li>
+                    <li><strong>Port Liberty New York:</strong> Sets Actual Escort Time to 1.00 hr, base Zone Runtime to 2.50 hrs, and triggers strict KVK protocols (shifts 1 dual-service tug to an Escort Only tug). Does <em>not</em> waive runtime.</li>
+                    <li><strong>APM Elizabeth:</strong> Sets Actual Escort Time to 1.00 hr, base Zone Runtime to 2.50 hrs (reduces to 1.25 hrs if waived), and triggers strict KVK protocols.</li>
+                </ul>
+            </div>
+            <div class="assumption-block">
+                <h3>Direction</h3>
+                <p><strong>Drives:</strong> Runtime-waiver</p>
+                <p><strong>Assumption:</strong></p>
+                <ul style="margin-top: 0.5rem; padding-left: 1.2rem;">
+                    <li><strong>Inbound (Arrival):</strong> Qualifies for the runtime waiver (terminal dependent). Halves the base Zone Runtime (e.g., 2.50 hrs &rarr; 1.25 hrs) for Escort+Docking tugs because the return leg is waived once they transition to docking.</li>
+                    <li><strong>Outbound (Departure):</strong> No waiver applied for most terminals. Escorting tugs are billed the full round-trip Zone Time (e.g., 2.50 hrs). <em>Exception: Port Liberty Bayonne waives runtime for both inbound and outbound.</em></li>
+                </ul>
+            </div>
+            <div class="assumption-block">
+                <h3>Gross Tonnage (GRT)</h3>
+                <p><strong>Drives:</strong> Docking and Escort Units</p>
+                <p><strong>Assumption:</strong></p>
+                <ul style="margin-top: 0.5rem; padding-left: 1.2rem;">
+                    <li><strong>&lt; 45,000 GRT (Standard):</strong> Assigns 2 Docking tugs. Escort services are not mandatory (0 Escort units).</li>
+                    <li><strong>45,000 &ndash; 119,999 GRT (ULCV):</strong> Assigns 3 Docking tugs and triggers mandatory escorting (3 Escort units).</li>
+                    <li><strong>&ge; 120,000 GRT (SLCV/MLCV):</strong> Assigns 4 Docking tugs and 4 mandatory Escort units.</li>
+                </ul>
+            </div>
+            <div class="assumption-block">
+                <h3>Net Register Tonnage (NRT)</h3>
+                <p><strong>Drives:</strong> +40k NRT Fee</p>
+                <p><strong>Assumption:</strong></p>
+                <ul style="margin-top: 0.5rem; padding-left: 1.2rem;">
+                    <li><strong>&le; 40,000 NRT:</strong> $0 size premium.</li>
+                    <li><strong>&gt; 40,000 NRT:</strong> Adds exactly $1,400 to the invoice for <em>every</em> Docking line item assigned to the job.</li>
+                </ul>
+            </div>
+        </div>
+    </section>
+
+    <section class="methodology" style="margin-bottom: 2rem;">
+        <h2 class="section-label">Variables Assumptions</h2>
+        <div class="assumptions-grid">
+            <div class="assumption-block">
+                <h3>Adj: Docking Line Items</h3>
+                <p><strong>When to adjust:</strong></p>
+                <ul style="margin-top: 0.5rem; padding-left: 1.2rem;">
+                    <li><strong>Maximum Fleet Limit:</strong> Total physical tugs are hard-capped at 5 units.</li>
+                    <li><strong>Inoperable Bow Thruster:</strong> The Port Authority of NY & NJ guidelines dictate adding one (+1) additional docking tug for vessels without an operable bow thruster.</li>
+                    <li><strong>Adverse Weather / Ice Conditions:</strong> Safety guidelines require the assignment of one (+1) extra docking tug during harsh weather or ice conditions.</li>
+                </ul>
+            </div>
+            <div class="assumption-block">
+                <h3>Adj: Escort + Docking & Escort Only Services</h3>
+                <p><strong>When to adjust:</strong></p>
+                <ul style="margin-top: 0.5rem; padding-left: 1.2rem;">
+                    <li><strong>PLB (USNYC01) Runtime Exceptions:</strong> There are operational exceptions where Moran NY utilizes Escort Only tugs instead of combined Escort + Docking services. You must manually decrease the dual service variable and increase the Escort Only variable to reflect this.</li>
+                    <li><strong>Small Vessels in the Kill Van Kull Transit:</strong> Per harbor regulations, vessels &ge; 45,000 GRT require mandatory tug escorts. While vessels &lt; 45,000 GRT (Standard) default to 0 escort units, Moran NY uses Escort Only tugs when these smaller vessels transit restricted waterways like the Kill Van Kull to reach APM Elizabeth or Port Liberty New York.</li>
+                </ul>
+            </div>
+            <div class="assumption-block">
+                <h3>Actual Escort Time (hrs)</h3>
+                <p><strong>When to adjust:</strong></p>
+                <ul style="margin-top: 0.5rem; padding-left: 1.2rem;">
+                    <li><strong>Operational Delays:</strong> Manually increase or decrease this value over the baseline assumptions to account for real-world variables such as heavy waterway traffic and weather delays.</li>
+                </ul>
+            </div>
+        </div>
+    </section>
+
+    <section class="methodology" style="padding-bottom: 4rem;">
+        <h2 class="section-label">Billing Formulas</h2>
+        <div class="assumptions-grid">
+            <div class="assumption-block">
+                <h3>Docking</h3>
+                <p><strong>Formula:</strong> Base Cost = Docking Rate × Docking Line Items</p>
+                <p><strong>Assumption:</strong> Base tug dispatch is determined by Gross Tonnage (GRT). 2 tugs for
+                    &lt;45,000, 3 tugs for ≥45,000, and 4 tugs for ≥120,000.</p>
+            </div>
+            <div class="assumption-block">
+                <h3>+40K NRT Fee</h3>
+                <p><strong>Formula:</strong> Size Cost = If NRT > 40,000, add $1,400 × Docking Line Items
+                </p>
+                <p><strong>Assumption:</strong> This is an additional flat premium added per docking line item when the
+                    Net Register Tonnage exceeds the threshold.</p>
+            </div>
+            <div class="assumption-block">
+                <h3>Fuel Surcharge</h3>
+                <p><strong>Formula:</strong> Fuel Cost = ⌈(Fuel Price - 2.00) / 0.10⌉ × $15 × Total Physical Tugs</p>
+                <p><strong>Assumption:</strong> Calculated per physical tug using a $2.00 base. Every $0.10 increment
+                    (rounded up) adds a $15 surcharge.</p>
+            </div>
+            <div class="assumption-block">
+                <h3>Escort</h3>
+                <p><strong>Formula:</strong> Escort Cost = Escort Rate × Billed Hours (Actual Escort Time + Runtime) × Total Escorting Tugs</p>
+                <p><strong>Assumption:</strong> Billed Hours is rounded up to the nearest 0.5hrs increment and is subject to a 2.0-hour minimum billing per tug.</p>
+                <p>Per harbor regulations, vessels 45,000 GRT and larger require mandatory tug
+                    escorts to safely transit restricted waterways like the Kill Van Kull (Zone 11), whereas smaller vessels do
+                    not.</p>
+            </div>
+        </div>
+    </section>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <script>
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    </script>
+    
+    <script src="tug_grt_drop_mrn.js"></script>
+</body>
+</html>
