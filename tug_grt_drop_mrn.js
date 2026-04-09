@@ -786,22 +786,30 @@ async function extractInvoiceDataFromPDF(file) {
                         
                         currentTug.items.push({ desc, qty, rate, amount });
                         
-                        if (desc.toLowerCase().includes('fuel surcharge')) {
-                            invoiceData.tugs.push(currentTug);
-                            currentTug = null;
-                            possibleTugName = "Unknown Tug";
-                        }
                     } else {
                         let cleanLine = line.trim();
+                        
+                        // Heuristics to capture a new tug name. If it's a valid tug name and we have an existing tug, close the existing one.
                         if (cleanLine.length > 2 && cleanLine.length < 35 && 
                             !cleanLine.includes('$') && !cleanLine.match(/\d/) && 
                             !cleanLine.toLowerCase().includes('description') &&
                             !cleanLine.toLowerCase().includes('fuel') &&
                             !cleanLine.toLowerCase().includes('moran new york') &&
+                            !cleanLine.toLowerCase().includes('moran norfolk') &&
+                            !cleanLine.toLowerCase().includes('moran charleston') &&
+                            !cleanLine.toLowerCase().includes('moran savannah') &&
+                            !cleanLine.toLowerCase().includes('moran miami') &&
+                            !cleanLine.toLowerCase().includes('moran new orleans') &&
                             !cleanLine.toLowerCase().includes('division') &&
                             !cleanLine.toLowerCase().includes('invoice') &&
+                            !cleanLine.toLowerCase().includes('undocking') &&
+                            !cleanLine.toLowerCase().includes('docking') &&
                             !cleanLine.toLowerCase().includes('amount due')) {
                             
+                            if (currentTug && currentTug.items.length > 0) {
+                                invoiceData.tugs.push(currentTug);
+                                currentTug = null;
+                            }
                             possibleTugName = cleanLine;
                         }
                     }
