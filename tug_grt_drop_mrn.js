@@ -760,10 +760,10 @@ async function extractInvoiceDataFromPDF(file) {
                 const loaMatch = fullTextRaw.match(/LOA:?[^\d]*([\d,\.]+)/i) || fullText.match(/LOA:?[^\d]*([\d,\.]+)/i);
                 const grtMatch = fullTextRaw.match(/GRT:?[^\d]*([\d,]{4,})/i) || fullText.match(/GRT:?[^\d]*([\d,]{4,})/i);
                 const nrtMatch = fullTextRaw.match(/NRT:?[^\d]*([\d,]{4,})/i) || fullText.match(/NRT:?[^\d]*([\d,]{4,})/i);
-                const fuelMatch = fullText.match(/Fuel\s*@\s*([\d\.]+)/i); 
+                const fuelMatch = fullTextRaw.match(/Fuel\s*@\s*([\d\.]+)/i) || fullText.match(/Fuel\s*@\s*([\d\.]+)/i); 
                 const directionMatch = fullText.match(/(Undocking|Docking)\s+at/i);
                 const totalMatch = fullText.match(/TOTAL\s*AMOUNT\s*DUE:?[^\d\$]*\$?([\d,]+\.\d{2})/i);
-
+                
                 // --- DETECT REGION ---
                 let regionValue = 'nynj'; 
                 const lowerText = fullText.toLowerCase();
@@ -781,6 +781,9 @@ async function extractInvoiceDataFromPDF(file) {
                 } else if (lowerText.includes('moran new york')) {
                     regionValue = 'nynj';
                 }
+
+                // --- DETECT CANCELLATION ---
+                const isCancellation = /cancell?ation/i.test(fullTextRaw) || /cancelled/i.test(fullTextRaw) || /cancell?ation/i.test(fullText) || /cancelled/i.test(fullText);
 
                 // --- DETECT DESTINATION ---
                 let destValue = 'none';
@@ -810,6 +813,7 @@ async function extractInvoiceDataFromPDF(file) {
                     region: regionValue,
                     destination: destValue,
                     total: totalMatch ? parseFloat(totalMatch[1].replace(/,/g, '')) : 0,
+                    isCancellation: isCancellation,
                     tugs: []
                 };
 
@@ -1136,7 +1140,7 @@ function processInvoiceAudit(extractedData) {
     }
     
     if (timeVarianceBullets.length > 0) {
-        summaryBullets.push(`<strong>Time Variance:</strong> ${timeVarianceBullets.join(' ')} Recommend verifying the maneuver timeline using <a href="https://www.marinetraffic.com/en/ais/home/centerx:-97.8/centery:30.0/zoom:3" target="_blank" style="color:var(--accent-light); text-decoration:none; font-weight:600;">MarineTraffic AIS ↗</a>.`);
+        summaryBullets.push(`<strong>Time Variance:</strong> ${timeVarianceBullets.join(' ')} Recommend verifying the maneuver timeline.`);
     }
 
     let grandTotalDiff = extractedData.total - totalExpected;
@@ -1148,6 +1152,15 @@ function processInvoiceAudit(extractedData) {
 
     if (summaryBullets.length === 0) {
         summaryBullets.push(`<span style="color: var(--success); font-weight: 600;">All line items perfectly match the simulated standard baseline.</span> No further action required.`);
+    }
+
+    let cancellationBanner = '';
+    if (extractedData.isCancellation) {
+        cancellationBanner = `
+        <div style="background: #ffebee; border: 1px solid #ffcdd2; padding: 0.75rem 1rem; margin-top: 1rem; border-radius: 6px;">
+            <strong style="color: var(--warning); font-size: 0.85rem;"><span style="background: var(--warning); color: #fff; padding: 2px 6px; border-radius: 4px; font-size: 0.65rem; margin-right: 6px;">CANCELLATION</span></strong> 
+            <span style="font-size: 0.85rem; color: var(--text-main);">This invoice includes cancellation charges. Please review this invoice manually</span>
+        </div>`;
     }
 
     let summaryHtml = `<ul style="margin-top: 1rem; padding-left: 1.2rem; font-size: 0.85rem; color: var(--text-muted); line-height: 1.6;">`;
@@ -1171,7 +1184,7 @@ function processInvoiceAudit(extractedData) {
                 <h4 style="font-size: 0.8rem; text-transform: uppercase; color: var(--text-main); font-weight: 700; margin: 0;">Auditor Summary</h4>
                 <span style="background: #e0f2f1; color: #00796b; padding: 2px 6px; border-radius: 4px; font-size: 0.65rem; font-weight: bold; border: 1px solid #b2dfdb;">EXPERIMENTAL FEATURE</span>
             </div>
-            ${summaryHtml}
+            ${cancellationBanner} ${summaryHtml}
             <div style="font-size: 0.75rem; color: var(--text-light); margin-top: 0.5rem; font-style: italic;">
                 * Note: The logic above is for educational and analytical guidance only and may not capture all operational nuances (e.g., weather delays or tariff modifications). Always verify discrepancies directly with the port agent.
             </div>
