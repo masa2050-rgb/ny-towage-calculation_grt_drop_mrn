@@ -5,7 +5,7 @@ const regionalRates = {
     nynj: { docking: 2150, escort: 1000 },
     norfolk: { docking: 2150, escort: 1000 },
     charleston: { docking: 2150, escort: 0 },
-    savannah: { docking: 2050, escort: 0 },
+    savannah: { docking: 2050, escort: 2895 }, 
     miami: { docking: 3100, thirdTug: 4600, escort: 0 },
     neworleans: { docking: 1800, escort: 0 }
 };
@@ -43,12 +43,12 @@ const terminalsByRegion = {
     ]
 };
 
+// --- UPDATE 1: Toggle UI elements based on region ---
 function handleRegionChange() {
     const regionKey = document.getElementById('region').value;
     const rates = regionalRates[regionKey];
     
     document.getElementById('yearRate').value = rates.docking;
-    document.getElementById('escortRate').value = rates.escort;
     
     const destSelect = document.getElementById('destination');
     const terminalGroup = destSelect.closest('.input-group');
@@ -99,7 +99,7 @@ const destinationRules = {
     USCHS01: { runtime: 0.0, zones: 'N/A', isKVK: false, defaultPolicy: 'waive', route: 'Wando Welch Terminal' },
     USMIA02: { runtime: 0.0, zones: 'N/A', isKVK: false, defaultPolicy: 'waive', route: 'APM Terminals Miami' },
     USMSY01: { runtime: 0.0, zones: 'N/A', isKVK: false, defaultPolicy: 'waive', route: 'Napoleon Avenue Terminal' },
-    USSAV01: { runtime: 0.0, zones: 'N/A', isKVK: false, defaultPolicy: 'waive', route: 'Garden City Terminal' },
+    USSAV01: { runtime: 1.00, zones: 'Kings Island', isKVK: false, defaultPolicy: 'waive', route: 'Fort Jackson → Kings Island (GCT)' }, 
     none: { runtime: 0.0, zones: 'N/A', isKVK: false, defaultPolicy: 'waive', route: 'N/A' }
 };
 
@@ -185,6 +185,10 @@ function calcTotalFromState(state) {
     const nrt = parseFloat(document.getElementById('nrt').value);
     const fuelPrice = parseFloat(document.getElementById('fuel').value);
     const finalEscortRate = parseFloat(document.getElementById('escortRate').value);
+    
+    // Fetch draft and convert feet to meters for the Deep Draft Penalty logic
+    const draftFeet = parseFloat(document.getElementById('draft')?.value || 42.0);
+    const draftMeters = draftFeet / 3.28084;
 
     let totalTugs = state.dockingOnly + state.escortDocking + state.escortOnly;
     let dockingServices = state.dockingOnly + state.escortDocking;
@@ -192,6 +196,7 @@ function calcTotalFromState(state) {
     const regionKey = document.getElementById('region') ? document.getElementById('region').value : 'nynj';
     let simBaseCost = 0;
 
+    // 1. Base Docking Cost
     if (regionKey === 'miami') {
         if (dockingServices <= 2) {
             simBaseCost = dockingServices * yearRate;
@@ -201,14 +206,37 @@ function calcTotalFromState(state) {
     } else {
         simBaseCost = dockingServices * yearRate;
     }
-    let simSizeCost = nrt > 40000 ? (dockingServices * 1400) : 0;
+
+    // 2. Savannah Additional Tug Volumetric Surcharge (> 2 physical tugs)
+    if (regionKey === 'savannah' && totalTugs > 2) {
+        let additionalTugSurcharge = (totalTugs - 2) * (nrt * 0.40);
+        simBaseCost += additionalTugSurcharge;
+    }
+
+    // 3. Dimensional Surcharges (NRT + Deep Draft)
+    let simSizeCost = 0;
+    if (regionKey === 'savannah') {
+        simSizeCost = nrt > 40000 ? (dockingServices * 1400) : 0;
+        
+        // Deep Draft Penalty Tier Logic (Assessed once per total vessel NRT)
+        if (draftMeters >= 12.5 && draftMeters <= 13.5) {
+            simSizeCost += (nrt * 0.15);
+        } else if (draftMeters > 13.5) {
+            simSizeCost += (nrt * 0.20);
+        }
+    } else {
+        // Default global application for non-Savannah regions (if needed)
+        simSizeCost = nrt > 40000 ? (dockingServices * 1400) : 0;
+    }
     
+    // 4. Fuel Surcharge
     let simFuelCost = 0;
     if (fuelPrice > 2.00) {
-        const inc = Math.ceil(Math.round((fuelPrice - 2.00) * 100) / 10);
+        const inc = Math.ceil(parseFloat((fuelPrice - 2.00).toFixed(2)) / 0.10);
         simFuelCost = totalTugs * (inc * 15);
     }
 
+    // 5. Escort Services
     let simBilledDual = Math.max(2.0, Math.round((state.actualTime + state.runtimeDual) * 2) / 2);
     let simBilledOnly = Math.max(2.0, Math.round((state.actualTimeOnly + state.runtimeOnly) * 2) / 2);
 
@@ -222,23 +250,52 @@ function calcTotalFromState(state) {
 }
 
 function getRangeBoundaries(vClass) {
+    const regionKey = document.getElementById('region') ? document.getElementById('region').value : 'nynj';
     let medState = getBaseState(vClass);
     medState.total = calcTotalFromState(medState);
 
     let minState = { ...medState };
     let maxState = { ...medState };
 
-    let rSteps = 1;
-    if (minState.escortDocking > 0) { let d = Math.min(minState.escortDocking, rSteps); minState.escortDocking -= d; rSteps -= d; }
-    if (rSteps > 0 && minState.dockingOnly > 0) { let d = Math.min(minState.dockingOnly, rSteps); minState.dockingOnly -= d; rSteps -= d; }
-    if (rSteps > 0 && minState.escortOnly > 0) { let d = Math.min(minState.escortOnly, rSteps); minState.escortOnly -= d; rSteps -= d; }
-    
-    if (minState.actualTime > 0) minState.actualTime = Math.max(0, minState.actualTime - 0.25);
-    if (minState.actualTimeOnly > 0) minState.actualTimeOnly = Math.max(0, minState.actualTimeOnly - 0.25);
+    if (regionKey === 'savannah') {
+        if (vClass === 'Standard') {
+            // Min: Reduces fleet to 1 Docking Only tug
+            minState.dockingOnly = Math.max(0, minState.dockingOnly - 1);
+            // Max: Increases fleet to 3 Docking Only tugs due to adverse weather
+            maxState.dockingOnly += 1;
+        } else if (vClass === 'Small ULCV') {
+            // Min: Drops the escorting tug entirely, leaving 1 Docking Only tug
+            minState.escortDocking = 0;
+            minState.escortOnly = 0;
+            minState.dockingOnly = 1;
+            // Max: +1 Docking Only, +0.25 hrs escort time
+            maxState.dockingOnly += 1;
+            if (maxState.actualTime > 0) maxState.actualTime += 0.25;
+        } else if (vClass === 'Large ULCV') {
+            // Min: Reduces fleet to just 1 Escort+Docking tug
+            if (minState.escortDocking > 0) minState.escortDocking -= 1;
+            // Max: Increases physical fleet to 3 tugs (+1 Docking Only)
+            maxState.dockingOnly += 1;
+        } else if (vClass === 'SLCV') {
+            // Min: Reduces fleet to 2 Escort+Docking tugs
+            if (minState.escortDocking > 0) minState.escortDocking -= 1;
+            // Max: Increases physical fleet to 4 tugs (+1 Docking Only)
+            maxState.dockingOnly += 1;
+        }
+    } else {
+        // Standard NY/NJ Step Logic
+        let rSteps = 1;
+        if (minState.escortDocking > 0) { let d = Math.min(minState.escortDocking, rSteps); minState.escortDocking -= d; rSteps -= d; }
+        if (rSteps > 0 && minState.dockingOnly > 0) { let d = Math.min(minState.dockingOnly, rSteps); minState.dockingOnly -= d; rSteps -= d; }
+        if (rSteps > 0 && minState.escortOnly > 0) { let d = Math.min(minState.escortOnly, rSteps); minState.escortOnly -= d; rSteps -= d; }
+        
+        if (minState.actualTime > 0) minState.actualTime = Math.max(0, minState.actualTime - 0.25);
+        if (minState.actualTimeOnly > 0) minState.actualTimeOnly = Math.max(0, minState.actualTimeOnly - 0.25);
 
-    maxState.dockingOnly += 1; 
-    if (maxState.actualTime > 0) maxState.actualTime += 0.25;
-    if (maxState.actualTimeOnly > 0) maxState.actualTimeOnly += 0.25;
+        maxState.dockingOnly += 1; 
+        if (maxState.actualTime > 0) maxState.actualTime += 0.25;
+        if (maxState.actualTimeOnly > 0) maxState.actualTimeOnly += 0.25;
+    }
 
     minState.total = calcTotalFromState(minState);
     maxState.total = calcTotalFromState(maxState);
@@ -290,7 +347,7 @@ function updateModel() {
     const fuelPrice = parseFloat(document.getElementById('fuel').value);
     const direction = document.getElementById('direction').value;
     const destValue = document.getElementById('destination').value;
-    
+
     const routeEntry = destinationRules[destValue] || destinationRules.none;
     const destinationRuntime = routeEntry.runtime;
     const isKVK = routeEntry.isKVK;
@@ -354,12 +411,30 @@ function updateModel() {
     let vClass = "Standard";
     let baseIdealServices = 2;
 
-    if (grt >= 120000) {
-        vClass = "SLCV/MLCV";
-        baseIdealServices = 4;
-    } else if (grt >= 45000) {
-        vClass = "ULCV";
-        baseIdealServices = 3;
+    if (regionKey === 'savannah') {
+        // Apply Savannah GRT Proxy Thresholds
+        if (grt >= 155000) {
+            vClass = "SLCV";
+            baseIdealServices = 3;
+        } else if (grt >= 115000) {
+            vClass = "Large ULCV";
+            baseIdealServices = 2;
+        } else if (grt >= 100000) {
+            vClass = "Small ULCV";
+            baseIdealServices = 2;
+        } else {
+            vClass = "Standard";
+            baseIdealServices = 2;
+        }
+    } else {
+        // Original NY/NJ Thresholds
+        if (grt >= 120000) {
+            vClass = "SLCV/MLCV";
+            baseIdealServices = 4;
+        } else if (grt >= 45000) {
+            vClass = "ULCV";
+            baseIdealServices = 3;
+        }
     }
 
     let baseDocking = Math.min(5, baseIdealServices);
@@ -393,6 +468,7 @@ function updateModel() {
     if (baseEscortOnly + adjEscortOnly < 0) { document.getElementById('adjEscortOnly').value = -baseEscortOnly; document.getElementById('adjEscortOnly-display').innerText = -baseEscortOnly; }
 
     let maxPhysicalTugs = dockingOnlyCount + dualServiceCount + escortOnlyCount;
+    
     if (maxPhysicalTugs > 5) {
         let overflow = maxPhysicalTugs - 5;
         if (adjEscortOnly > 0 && overflow > 0) {
@@ -435,7 +511,7 @@ function updateModel() {
     let fuelCost = 0;
     let fuelRatePerTug = 0;
     if (fuelPrice > 2.00) {
-        const increments = Math.ceil(Math.round((fuelPrice - 2.00) * 100) / 10);
+        const increments = Math.ceil(parseFloat((fuelPrice - 2.00).toFixed(2)) / 0.10);
         fuelRatePerTug = increments * 15;
         fuelCost = maxPhysicalTugs * fuelRatePerTug;
     }
@@ -509,7 +585,8 @@ function updateModel() {
             dockingCost: currentDockingRate, dockingUnit: '1 Unit',
             nrtCost: sizeCostPerTug, nrtUnit: sizeCostPerTug > 0 ? '1 Unit' : '0 Units',
             fuelCost: fuelRatePerTug, fuelUnit: fuelRatePerTug > 0 ? '1 Unit' : '0 Units',
-            escortCost: escortDualCostPerTug, escortUnit: billedTimeDual.toFixed(1) + ' hrs' + discountText
+            escortCost: escortDualCostPerTug, escortUnit: billedTimeDual.toFixed(1) + ' hrs' + discountText,
+            serviceLabel: 'Escort'
         });
     }
     
@@ -522,7 +599,8 @@ function updateModel() {
             dockingCost: currentDockingRate, dockingUnit: '1 Unit',
             nrtCost: sizeCostPerTug, nrtUnit: sizeCostPerTug > 0 ? '1 Unit' : '0 Units',
             fuelCost: fuelRatePerTug, fuelUnit: fuelRatePerTug > 0 ? '1 Unit' : '0 Units',
-            escortCost: 0, escortUnit: '0.0 hrs'
+            escortCost: 0, escortUnit: '0.0 hrs',
+            serviceLabel: 'Escort'
         });
     }
     
@@ -532,7 +610,8 @@ function updateModel() {
             dockingCost: 0, dockingUnit: '0 Units',
             nrtCost: 0, nrtUnit: '0 Units',
             fuelCost: fuelRatePerTug, fuelUnit: fuelRatePerTug > 0 ? '1 Unit' : '0 Units',
-            escortCost: escortOnlyCostPerTug, escortUnit: billedTimeOnly.toFixed(1) + ' hrs' + discountText
+            escortCost: escortOnlyCostPerTug, escortUnit: billedTimeOnly.toFixed(1) + ' hrs' + discountText,
+            serviceLabel: 'Escort'
         });
     }
     
@@ -561,7 +640,7 @@ function updateModel() {
                     <span style="flex: 1; text-align: right;">${formatMoney(tug.fuelCost)}</span>
                 </div>
                 <div style="display: flex; justify-content: space-between; font-size: 0.8rem; font-weight: 600; color: var(--text-main);">
-                    <span style="flex: 1;">Escort</span>
+                    <span style="flex: 1;">${tug.serviceLabel}</span>
                     <span style="flex: 1; text-align: center; color: var(--text-muted); font-weight: 400;">${tug.escortUnit}</span>
                     <span style="flex: 1; text-align: right;">${formatMoney(tug.escortCost)}</span>
                 </div>
@@ -582,14 +661,34 @@ function renderDynamicRanges() {
     const terminalName = destSelect && destSelect.options[destSelect.selectedIndex] ? destSelect.options[destSelect.selectedIndex].text : '';
 
     let currentClass = "Standard";
-    let displayTitle = `Standard (< 45k GRT) | ${terminalName}`;
+    let displayTitle = `Standard | ${terminalName}`;
+    const regionKey = document.getElementById('region') ? document.getElementById('region').value : 'nynj';
     
-    if (grt >= 120000) {
-        currentClass = "SLCV/MLCV";
-        displayTitle = `SLCV (≥ 120k GRT) | ${terminalName}`;
-    } else if (grt >= 45000) {
-        currentClass = "ULCV";
-        displayTitle = `ULCV (45k - 119k GRT) | ${terminalName}`;
+    if (regionKey === 'savannah') {
+        if (grt >= 155000) {
+            currentClass = "SLCV";
+            displayTitle = `SLCV (≥ 155k GRT) | ${terminalName}`;
+        } else if (grt >= 115000) {
+            currentClass = "Large ULCV";
+            displayTitle = `Large ULCV (115k - 154k GRT) | ${terminalName}`;
+        } else if (grt >= 100000) {
+            currentClass = "Small ULCV";
+            displayTitle = `Small ULCV (100k - 114k GRT) | ${terminalName}`;
+        } else {
+            currentClass = "Standard";
+            displayTitle = `Standard (< 100k GRT) | ${terminalName}`;
+        }
+    } else {
+        if (grt >= 120000) {
+            currentClass = "SLCV/MLCV";
+            displayTitle = `SLCV (≥ 120k GRT) | ${terminalName}`;
+        } else if (grt >= 45000) {
+            currentClass = "ULCV";
+            displayTitle = `ULCV (45k - 119k GRT) | ${terminalName}`;
+        } else {
+            currentClass = "Standard";
+            displayTitle = `Standard (< 45k GRT) | ${terminalName}`;
+        }
     }
 
     let absoluteMaxCost = calcTotalFromState(getRangeBoundaries(currentClass).maxState);
@@ -757,6 +856,7 @@ async function extractInvoiceDataFromPDF(file) {
                 vesselName = vesselName.replace(/Moran New York/gi, '').replace(/A Division of Moran Towing Corporation/gi, '').trim();
 
                 const dateMatch = fullTextRaw.match(/Date:\s*(\d{2}-\d{2}-\d{4})/i) || fullText.match(/Date:\s*(\d{2}-\d{2}-\d{4})/i);
+                const docMatch = fullTextRaw.match(/Document\s*#:\s*(\d+)/i) || fullText.match(/Document\s*#:\s*(\d+)/i);
                 const loaMatch = fullTextRaw.match(/LOA:?[^\d]*([\d,\.]+)/i) || fullText.match(/LOA:?[^\d]*([\d,\.]+)/i);
                 const grtMatch = fullTextRaw.match(/GRT:?[^\d]*([\d,]{4,})/i) || fullText.match(/GRT:?[^\d]*([\d,]{4,})/i);
                 const nrtMatch = fullTextRaw.match(/NRT:?[^\d]*([\d,]{4,})/i) || fullText.match(/NRT:?[^\d]*([\d,]{4,})/i);
@@ -800,10 +900,13 @@ async function extractInvoiceDataFromPDF(file) {
                     } else if (lowerText.includes('virginia international gateway') || lowerText.includes('vig') || lowerText.includes('apm')) {
                         destValue = 'USORF03';
                     }
+                } else if (regionValue === 'savannah') {
+                    destValue = 'USSAV01';
                 }
 
                 const invoiceData = {
                     vesselName: vesselName,
+                    docNumber: docMatch ? docMatch[1] : 'Unknown',
                     serviceDate: dateMatch ? dateMatch[1] : 'Unknown Date',
                     loa: loaMatch ? parseFloat(loaMatch[1].replace(/,/g, '')) : 0,
                     grt: grtMatch ? parseFloat(grtMatch[1].replace(/,/g, '')) : 120000,
@@ -852,22 +955,26 @@ async function extractInvoiceDataFromPDF(file) {
                         
                     } else {
                         let cleanLine = line.trim();
+                        let lowerLine = cleanLine.toLowerCase();
                         
                         if (cleanLine.length > 2 && cleanLine.length < 35 && 
                             !cleanLine.includes('$') && !cleanLine.match(/\d/) && 
-                            !cleanLine.toLowerCase().includes('description') &&
-                            !cleanLine.toLowerCase().includes('fuel') &&
-                            !cleanLine.toLowerCase().includes('moran new york') &&
-                            !cleanLine.toLowerCase().includes('moran norfolk') &&
-                            !cleanLine.toLowerCase().includes('moran charleston') &&
-                            !cleanLine.toLowerCase().includes('moran savannah') &&
-                            !cleanLine.toLowerCase().includes('moran miami') &&
-                            !cleanLine.toLowerCase().includes('moran new orleans') &&
-                            !cleanLine.toLowerCase().includes('division') &&
-                            !cleanLine.toLowerCase().includes('invoice') &&
-                            !cleanLine.toLowerCase().includes('undocking') &&
-                            !cleanLine.toLowerCase().includes('docking') &&
-                            !cleanLine.toLowerCase().includes('amount due')) {
+                            !cleanLine.startsWith('+') && !cleanLine.startsWith('-') &&
+                            !lowerLine.includes('description') &&
+                            !lowerLine.includes('runtime') && 
+                            !lowerLine.includes('discount') &&
+                            !lowerLine.includes('fuel') &&
+                            !lowerLine.includes('moran new york') &&
+                            !lowerLine.includes('moran norfolk') &&
+                            !lowerLine.includes('moran charleston') &&
+                            !lowerLine.includes('moran savannah') &&
+                            !lowerLine.includes('moran miami') &&
+                            !lowerLine.includes('moran new orleans') &&
+                            !lowerLine.includes('division') &&
+                            !lowerLine.includes('invoice') &&
+                            !lowerLine.includes('undocking') &&
+                            !lowerLine.includes('docking') &&
+                            !lowerLine.includes('amount due')) {
                             
                             if (currentTug && currentTug.items.length > 0) {
                                 invoiceData.tugs.push(currentTug);
@@ -953,7 +1060,7 @@ function processInvoiceAudit(extractedData) {
     const bounds = getRangeBoundaries(vClass);
     const median = bounds.medState;
 
-    let extDockingOnly = 0, extEscortDocking = 0, extEscortOnly = 0;
+    let extDockingOnly = 0, extEscortDocking = 0, extEscortOnly = 0, extAssistOnly = 0;
     let extMaxTimeDual = 0, extMaxTimeOnly = 0;
 
     let invoiceDockingRates = new Set();
@@ -962,7 +1069,7 @@ function processInvoiceAudit(extractedData) {
     let tetheredRate = 0;
 
     extractedData.tugs.forEach(tug => {
-        let hasDocking = false, hasEscort = false, billedTime = 0;
+        let hasDocking = false, hasEscort = false, hasAssist = false, billedTime = 0;
         tug.items.forEach(item => {
             let descLower = item.desc.toLowerCase();
             if ((descLower.includes('docking') && !descLower.includes('escort')) || descLower.includes('undocking')) {
@@ -978,6 +1085,9 @@ function processInvoiceAudit(extractedData) {
                     tetheredRate = item.rate;
                 }
             }
+            if (descLower.includes('assistance') || descLower.includes('assist')) {
+                hasAssist = true;
+            }
         });
         
         if (hasDocking && hasEscort) {
@@ -988,6 +1098,8 @@ function processInvoiceAudit(extractedData) {
         } else if (hasEscort) {
             extEscortOnly++;
             extMaxTimeOnly = Math.max(extMaxTimeOnly, billedTime);
+        } else if (hasAssist) {
+            extAssistOnly++; 
         }
     });
 
@@ -1012,8 +1124,21 @@ function processInvoiceAudit(extractedData) {
 
     html += `
     <div style="background: var(--panel-bg); border: 1px solid var(--border); border-radius: var(--radius); padding: 1.5rem; margin-bottom: 1.5rem; display: flex; flex-wrap: wrap; gap: 2.5rem; box-shadow: var(--shadow);">
-        <div><div style="font-size: 0.75rem; color: var(--text-muted); font-weight: 700; text-transform: uppercase;">Vessel Name</div><div style="font-family: var(--font-sans); font-size: 1.1rem; font-weight: 800; color: var(--accent);">${extractedData.vesselName}</div></div>
-        <div><div style="font-size: 0.75rem; color: var(--text-muted); font-weight: 700; text-transform: uppercase;">Service Date</div><div style="font-family: var(--font-mono); font-size: 1.1rem; font-weight: 800; color: var(--text-main);">${extractedData.serviceDate}</div></div>
+        <div>
+            <div style="font-size: 0.75rem; color: var(--text-muted); font-weight: 700; text-transform: uppercase;">Vessel Name</div>
+            <div style="font-family: var(--font-sans); font-size: 1.1rem; font-weight: 800; color: var(--accent);">${extractedData.vesselName}</div>
+        </div>
+        
+        <div>
+            <div style="font-size: 0.75rem; color: var(--text-muted); font-weight: 700; text-transform: uppercase;">Document #</div>
+            <div style="font-family: var(--font-mono); font-size: 1.1rem; font-weight: 800; color: var(--text-main);">${extractedData.docNumber}</div>
+        </div>
+
+        <div>
+            <div style="font-size: 0.75rem; color: var(--text-muted); font-weight: 700; text-transform: uppercase;">Service Date</div>
+            <div style="font-family: var(--font-mono); font-size: 1.1rem; font-weight: 800; color: var(--text-main);">${extractedData.serviceDate}</div>
+        </div>
+        
         <div><div style="font-size: 0.75rem; color: var(--text-muted); font-weight: 700; text-transform: uppercase;">LOA</div><div style="font-family: var(--font-mono); font-size: 1.1rem; font-weight: 800; color: var(--text-main);">${extractedData.loa.toLocaleString()} ft</div></div>
         <div><div style="font-size: 0.75rem; color: var(--text-muted); font-weight: 700; text-transform: uppercase;">GRT</div><div style="font-family: var(--font-mono); font-size: 1.1rem; font-weight: 800; color: var(--text-main);">${extractedData.grt.toLocaleString()}</div></div>
         <div><div style="font-size: 0.75rem; color: var(--text-muted); font-weight: 700; text-transform: uppercase;">NRT</div><div style="font-family: var(--font-mono); font-size: 1.1rem; font-weight: 800; color: var(--text-main);">${extractedData.nrt.toLocaleString()}</div></div>
@@ -1025,7 +1150,7 @@ function processInvoiceAudit(extractedData) {
     
     let expectedFuelFee = 0;
     if (extractedData.fuel > 2.00) {
-        const increments = Math.ceil(Math.round((extractedData.fuel - 2.00) * 100) / 10);
+        const increments = Math.ceil(parseFloat((extractedData.fuel - 2.00).toFixed(2)) / 0.10);
         expectedFuelFee = increments * 15;
     }
 
@@ -1047,9 +1172,9 @@ function processInvoiceAudit(extractedData) {
 
     let summaryBullets = [];
     
-    let physicalTugDiff = (extDockingOnly + extEscortDocking + extEscortOnly) - (median.dockingOnly + median.escortDocking + median.escortOnly);
+    let physicalTugDiff = (extDockingOnly + extEscortDocking + extEscortOnly + extAssistOnly) - (median.dockingOnly + median.escortDocking + median.escortOnly);
     if (physicalTugDiff > 0) {
-        summaryBullets.push(`<strong>Fleet Variance:</strong> The invoice billed ${physicalTugDiff} additional physical tug(s) compared to the ${vClass} standard. This is likely an extra safety docking tug. Confirm arrangement with agent.`);
+        summaryBullets.push(`<strong>Fleet Variance:</strong> The invoice billed ${physicalTugDiff} additional physical tug(s) compared to the ${vClass} standard. Verify the operational necessity with the agent.`);
     } else if (physicalTugDiff < 0) {
         summaryBullets.push(`<strong>Fleet Variance:</strong> The invoice billed ${Math.abs(physicalTugDiff)} fewer physical tug(s) than expected for a ${vClass} vessel.`);
     }
@@ -1203,7 +1328,7 @@ function processInvoiceAudit(extractedData) {
             </div>
         `;
 
-        let hasDocking = false, hasEscort = false;
+        let hasDocking = false, hasEscort = false, hasAssist = false;
         tug.items.forEach(item => {
             let descLower = item.desc.toLowerCase();
             if ((descLower.includes('docking') && !descLower.includes('escort')) || descLower.includes('undocking')) hasDocking = true;
@@ -1217,10 +1342,16 @@ function processInvoiceAudit(extractedData) {
             let reasonText = "";
             
             if (descLower.includes('discount')) {
-                let expTime = (hasDocking && hasEscort) ? expectedBilledTimeDual : expectedBilledTimeOnly;
-                expectedAmount = (extractedData.region !== 'nynj') ? -(expTime * finalEscortRate * 0.25) : 0;
-                expectedQty = item.qty;
-                reasonText = `<div style="font-size: 0.7rem; color: var(--success); margin-top: 2px;">Expected 25% Contract Discount on Escort/Detention.</div>`;
+                // If it's a massive quantity or standard 25%, it's likely a total flat dollar amount being discounted
+                if (item.qty > 100 || item.rate === 25) {
+                    expectedAmount = -(item.qty * 0.25);
+                    expectedQty = item.qty;
+                    reasonText = `<div style="font-size: 0.7rem; color: var(--success); margin-top: 2px;">Expected 25% Contract Discount applied to total.</div>`;
+                } else {
+                    let expTime = (hasDocking && hasEscort) ? expectedBilledTimeDual : expectedBilledTimeOnly;
+                    expectedAmount = (extractedData.region !== 'nynj') ? -(expTime * finalEscortRate * 0.25) : 0;
+                    expectedQty = item.qty;
+                }
             }
             else if ((descLower.includes('docking') && !descLower.includes('escort')) || descLower.includes('undocking')) { 
                 expectedAmount = yearRate; expectedQty = 1; 
@@ -1234,6 +1365,12 @@ function processInvoiceAudit(extractedData) {
             else if (descLower.includes('fuel surcharge')) { 
                 expectedAmount = expectedFuelFee; expectedQty = 1; 
             } 
+            else if (descLower.includes('assistance') || descLower.includes('assist')) {
+                // Assistance is non-standard. Expect 0, which correctly throws a warning FAIL badge.
+                expectedAmount = 0; 
+                expectedQty = 0; 
+                reasonText = `<div style="font-size: 0.7rem; color: var(--warning); margin-top: 2px;">Assisting service is a non-standard situational exception (no contract rate). Verify with agent.</div>`;
+            }
             else if (descLower.includes('escort') || descLower.includes('detention')) {
                 let expTime = (hasDocking && hasEscort) ? expectedBilledTimeDual : expectedBilledTimeOnly;
                 expectedAmount = expTime * finalEscortRate; expectedQty = expTime; 
@@ -1257,7 +1394,7 @@ function processInvoiceAudit(extractedData) {
                 badgeHtml = `<span style="background: #e8f5e9; color: var(--success); border: 1px solid #c8e6c9; padding: 2px 6px; border-radius: 4px; font-size: 0.65rem; font-weight: bold; margin-left: 10px; display: inline-block;">PASS</span>`;
             }
 
-            let unitLabel = (descLower.includes('time') || descLower.includes('escort') || descLower.includes('runtimes') || descLower.includes('detention')) ? 'hrs' : 'units';
+            let unitLabel = (descLower.includes('time') || descLower.includes('escort') || descLower.includes('runtimes') || descLower.includes('detention') || descLower.includes('assistance') || descLower.includes('assist')) ? 'hrs' : 'units';
             
             html += `
             <div style="display: flex; justify-content: space-between; align-items: flex-start; font-size: 0.85rem; margin-bottom: 0.8rem; color: var(--text-main);">
