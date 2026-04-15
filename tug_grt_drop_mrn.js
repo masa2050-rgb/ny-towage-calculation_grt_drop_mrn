@@ -5,7 +5,7 @@ const regionalRates = {
     nynj: { docking: 2150, escort: 1000 },
     norfolk: { docking: 2150, escort: 1000 },
     charleston: { docking: 2150, escort: 0 },
-    savannah: { docking: 2050, escort: 0 },
+    savannah: { docking: 2050, escort: 2895 }, 
     miami: { docking: 3100, thirdTug: 4600, escort: 0 },
     neworleans: { docking: 1800, escort: 0 }
 };
@@ -43,17 +43,29 @@ const terminalsByRegion = {
     ]
 };
 
+// --- UPDATE 1: Toggle UI elements based on region ---
 function handleRegionChange() {
     const regionKey = document.getElementById('region').value;
     const rates = regionalRates[regionKey];
     
-    // Update the base rate sliders
     document.getElementById('yearRate').value = rates.docking;
-    document.getElementById('escortRate').value = rates.escort;
     
-    // Handle Terminal Dropdown Visibility and Content
+    const escortSlider = document.getElementById('escortRate');
+    if (escortSlider) {
+        escortSlider.max = 4000; 
+        escortSlider.value = rates.escort;
+    }
+    
     const destSelect = document.getElementById('destination');
     const terminalGroup = destSelect.closest('.input-group');
+    
+    // Show/Hide Savannah specific inputs
+    const isSavannah = (regionKey === 'savannah');
+    if (document.getElementById('teu-group')) document.getElementById('teu-group').style.display = isSavannah ? 'block' : 'none';
+    if (document.getElementById('beam-group')) document.getElementById('beam-group').style.display = isSavannah ? 'block' : 'none';
+    if (document.getElementById('loa-group')) document.getElementById('loa-group').style.display = isSavannah ? 'block' : 'none';
+    if (document.getElementById('draft-group')) document.getElementById('draft-group').style.display = isSavannah ? 'block' : 'none';
+    if (document.getElementById('savannah-restrictions')) document.getElementById('savannah-restrictions').style.display = isSavannah ? 'block' : 'none';
     
     if (regionKey === 'nynj' || regionKey === 'norfolk' || regionKey === 'charleston' || regionKey === 'savannah' || regionKey === 'miami' || regionKey === 'neworleans') {
         const terminals = terminalsByRegion[regionKey] || [];
@@ -66,27 +78,19 @@ function handleRegionChange() {
         });
         terminalGroup.style.display = 'block';
         
-        // Set default selections
-        if (regionKey === 'nynj') {
-            destSelect.value = 'bayonne';
-        } else if (regionKey === 'norfolk') {
-            destSelect.value = 'none';
-        } else if (regionKey === 'charleston') {
-            destSelect.value = 'USCHS01';
-        } else if (regionKey === 'miami') {
-            destSelect.value = 'USMIA02';
-        } else if (regionKey === 'neworleans') {
-            destSelect.value = 'USMSY01';
-        } else if (regionKey === 'savannah') {
-            destSelect.value = 'USSAV01';
-        }
+        if (regionKey === 'nynj') destSelect.value = 'bayonne';
+        else if (regionKey === 'norfolk') destSelect.value = 'none';
+        else if (regionKey === 'charleston') destSelect.value = 'USCHS01';
+        else if (regionKey === 'miami') destSelect.value = 'USMIA02';
+        else if (regionKey === 'neworleans') destSelect.value = 'USMSY01';
+        else if (regionKey === 'savannah') destSelect.value = 'USSAV01';
     } else {
         terminalGroup.style.display = 'none';
         destSelect.innerHTML = '<option value="none" selected>Not Applicable</option>';
         destSelect.value = 'none';
     }
     
-    handleRoutingChange(true); // Automatically triggers updateModel
+    handleRoutingChange(true); 
 }
 
 const formatMoney = (amount) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(amount);
@@ -102,7 +106,7 @@ const destinationRules = {
     USCHS01: { runtime: 0.0, zones: 'N/A', isKVK: false, defaultPolicy: 'waive', route: 'Wando Welch Terminal' },
     USMIA02: { runtime: 0.0, zones: 'N/A', isKVK: false, defaultPolicy: 'waive', route: 'APM Terminals Miami' },
     USMSY01: { runtime: 0.0, zones: 'N/A', isKVK: false, defaultPolicy: 'waive', route: 'Napoleon Avenue Terminal' },
-    USSAV01: { runtime: 0.0, zones: 'N/A', isKVK: false, defaultPolicy: 'waive', route: 'Garden City Terminal' },
+    USSAV01: { runtime: 1.00, zones: 'Kings Island', isKVK: false, defaultPolicy: 'waive', route: 'Fort Jackson → Kings Island (GCT)' }, 
     none: { runtime: 0.0, zones: 'N/A', isKVK: false, defaultPolicy: 'waive', route: 'N/A' }
 };
 
@@ -112,8 +116,9 @@ function getCurrentFuelPrice() {
 
 window.extractedInvoiceMetrics = null;
 
-// --- GLOBAL MATH HELPERS ---
+// --- UPDATE 2: Savannah Tug Dispatch Logic ---
 function getBaseState(vClass) {
+    const regionKey = document.getElementById('region') ? document.getElementById('region').value : 'nynj';
     const destValue = document.getElementById('destination').value;
     const direction = document.getElementById('direction').value;
     const routeEntry = destinationRules[destValue] || destinationRules.none;
@@ -124,21 +129,48 @@ function getBaseState(vClass) {
 
     let simActualTime = destValue === 'bayonne' ? 0.5 : 1.0;
     let simActualTimeOnly = simActualTime;
-
     let simRuntimeDual = destinationRuntime;
+    
     if ((direction === 'inbound' && runtimePolicy === 'waive') || runtimePolicy === 'waive_both') {
         simRuntimeDual = destinationRuntime / 2;
     }
     let simRuntimeOnly = destinationRuntime; 
 
-    let baseIdeal = 2;
-    if (vClass === 'SLCV/MLCV') baseIdeal = 4;
-    else if (vClass === 'ULCV') baseIdeal = 3;
+    let baseDocking = 2;
+    let baseEscort = 0;
 
-    let baseDocking = baseIdeal;
-    let baseEscort = (vClass === 'Standard') ? 0 : baseDocking;
+    if (regionKey === 'savannah') {
+        const beam = parseFloat(document.getElementById('beam')?.value || 142);
+        const teu = parseFloat(document.getElementById('teu')?.value || 10000);
+        const loa = parseFloat(document.getElementById('loa')?.value || 900);
+        
+        if (beam <= 142) {
+            baseEscort = 0;
+        } else if (beam > 168) {
+            baseEscort = 3;
+        } else if (beam > 151 && beam <= 168 && teu >= 11000) {
+            if (beam < 158 || loa < 1000) {
+                baseEscort = 1;
+            } else {
+                baseEscort = 2;
+            }
+        } else if (beam > 142 && beam <= 158 && teu < 11000) {
+            baseEscort = 1;
+        } else {
+            baseEscort = 1; 
+        }
+        
+        baseDocking = Math.max(2, baseEscort); 
+    } else {
+        let baseIdeal = 2;
+        if (vClass === 'SLCV/MLCV') baseIdeal = 4;
+        else if (vClass === 'ULCV') baseIdeal = 3;
 
-    if (isKVK && vClass !== 'Standard') baseDocking = baseEscort - 1;
+        baseDocking = baseIdeal;
+        baseEscort = (vClass === 'Standard') ? 0 : baseDocking;
+        if (isKVK && vClass !== 'Standard') baseDocking = baseEscort - 1;
+    }
+
     if (finalEscortRate === 0) baseEscort = 0;
 
     let dualCount = Math.min(baseDocking, baseEscort);
@@ -181,7 +213,7 @@ function calcTotalFromState(state) {
     
     let simFuelCost = 0;
     if (fuelPrice > 2.00) {
-        const inc = Math.ceil(Math.round((fuelPrice - 2.00) * 100) / 10);
+        const inc = Math.ceil(parseFloat((fuelPrice - 2.00).toFixed(2)) / 0.10);
         simFuelCost = totalTugs * (inc * 15);
     }
 
@@ -259,13 +291,23 @@ function handleRoutingChange(isDestinationChange = false, sourceId = null) {
 }
 
 function updateModel() {
-    const grt = parseFloat(document.getElementById('grt').value);
-    const nrt = parseFloat(document.getElementById('nrt').value);
+    const regionKey = document.getElementById('region') ? document.getElementById('region').value : 'nynj';
+    let grt = parseFloat(document.getElementById('grt').value);
+    let nrt = parseFloat(document.getElementById('nrt').value);
     const yearRate = parseFloat(document.getElementById('yearRate').value);
     const fuelPrice = parseFloat(document.getElementById('fuel').value);
     const direction = document.getElementById('direction').value;
     const destValue = document.getElementById('destination').value;
     
+    const teu = parseFloat(document.getElementById('teu')?.value || 11000);
+    if (regionKey === 'savannah') {
+        nrt = Math.round(1253 + (5.12 * teu));
+        grt = Math.round(3431 + (10.22 * teu));
+        
+        if (document.getElementById('nrt')) document.getElementById('nrt').value = nrt;
+        if (document.getElementById('grt')) document.getElementById('grt').value = grt;
+    }
+
     const routeEntry = destinationRules[destValue] || destinationRules.none;
     const destinationRuntime = routeEntry.runtime;
     const isKVK = routeEntry.isKVK;
@@ -290,6 +332,36 @@ function updateModel() {
     document.getElementById('year-rate-val').innerText = '$' + yearRate.toLocaleString();
     document.getElementById('escort-rate-val').innerText = formatMoney(finalEscortRate) + '/hr';
 
+    const beam = parseFloat(document.getElementById('beam')?.value || 158);
+    const loa = parseFloat(document.getElementById('loa')?.value || 1000);
+    const draft = parseFloat(document.getElementById('draft')?.value || 42.0);
+
+    if (document.getElementById('teu-val')) document.getElementById('teu-val').innerText = teu.toLocaleString();
+    if (document.getElementById('beam-val')) document.getElementById('beam-val').innerText = beam + "'";
+    if (document.getElementById('loa-val')) document.getElementById('loa-val').innerText = loa + "'";
+    if (document.getElementById('draft-val')) document.getElementById('draft-val').innerText = draft.toFixed(1) + "'";
+
+    if (regionKey === 'savannah') {
+        const draftRuleEl = document.getElementById('sav-draft-rule');
+        const windRuleEl = document.getElementById('sav-wind-rule');
+        
+        if (teu >= 11000) {
+            draftRuleEl.innerHTML = "<strong>Draft Window:</strong> Flood Current Only (Due to 11,000+ TEU ULCV rule).";
+        } else if (draft <= 40) {
+            draftRuleEl.innerHTML = "<strong>Draft Window:</strong> Anytime movement (offset by negative tide predictions).";
+        } else if (draft > 40 && draft <= 42.3) {
+            draftRuleEl.innerHTML = "<strong>Draft Window:</strong> Flood Current Only (30 mins after low water to 2 hours before high water).";
+        } else {
+            draftRuleEl.innerHTML = "<strong>Draft Window:</strong> Governed dynamically by DUKC software (Requires 10-15% UKC).";
+        }
+
+        if (teu >= 11000) {
+            windRuleEl.innerHTML = "<strong>Wind & Air Draft Limit:</strong> Max 25 knots at channel entrance, 15 knots near container berths. Air Draft > 182 ft requires dynamic clearance (DUKC).";
+        } else {
+            windRuleEl.innerHTML = "<strong>Wind & Air Draft Limit:</strong> Standard port conditions apply. Air Draft > 182 ft requires dynamic clearance (DUKC).";
+        }
+    }
+
     if (document.getElementById('adjTime-display')) document.getElementById('adjTime-display').innerText = actualTime.toFixed(2);
     if (document.getElementById('adjTimeOnly-display')) document.getElementById('adjTimeOnly-display').innerText = actualTimeOnly.toFixed(2);
     if (document.getElementById('adjRuntime-display')) document.getElementById('adjRuntime-display').innerText = effectiveRuntimeDual.toFixed(2);
@@ -312,9 +384,16 @@ function updateModel() {
     if (isKVK && vClass !== "Standard") baseDocking = baseEscort - 1;
     if (finalEscortRate === 0) baseEscort = 0;
 
-    let baseDualService = Math.min(baseDocking, baseEscort);
-    let baseEscortOnly = Math.max(0, baseEscort - baseDualService);
-    let baseDockingOnly = Math.max(0, baseDocking - baseDualService);
+    if (regionKey === 'savannah') {
+        const state = getBaseState(vClass);
+        baseDualService = state.escortDocking;
+        baseEscortOnly = state.escortOnly;
+        baseDockingOnly = state.dockingOnly;
+    } else {
+        var baseDualService = Math.min(baseDocking, baseEscort);
+        var baseEscortOnly = Math.max(0, baseEscort - baseDualService);
+        var baseDockingOnly = Math.max(0, baseDocking - baseDualService);
+    }
 
     let adjDocking = parseInt(document.getElementById('adjDocking').value) || 0;
     let adjEscortDock = parseInt(document.getElementById('adjEscortDock').value) || 0;
@@ -330,6 +409,7 @@ function updateModel() {
     if (baseEscortOnly + adjEscortOnly < 0) { document.getElementById('adjEscortOnly').value = -baseEscortOnly; document.getElementById('adjEscortOnly-display').innerText = -baseEscortOnly; }
 
     let maxPhysicalTugs = dockingOnlyCount + dualServiceCount + escortOnlyCount;
+    
     if (maxPhysicalTugs > 5) {
         let overflow = maxPhysicalTugs - 5;
         if (adjEscortOnly > 0 && overflow > 0) {
@@ -354,8 +434,6 @@ function updateModel() {
     }
 
     let dockingServices = dualServiceCount + dockingOnlyCount;
-
-    const regionKey = document.getElementById('region') ? document.getElementById('region').value : 'nynj';
     let baseCost = 0;
 
     if (regionKey === 'miami') {
@@ -374,7 +452,7 @@ function updateModel() {
     let fuelCost = 0;
     let fuelRatePerTug = 0;
     if (fuelPrice > 2.00) {
-        const increments = Math.ceil(Math.round((fuelPrice - 2.00) * 100) / 10);
+        const increments = Math.ceil(parseFloat((fuelPrice - 2.00).toFixed(2)) / 0.10);
         fuelRatePerTug = increments * 15;
         fuelCost = maxPhysicalTugs * fuelRatePerTug;
     }
@@ -448,7 +526,8 @@ function updateModel() {
             dockingCost: currentDockingRate, dockingUnit: '1 Unit',
             nrtCost: sizeCostPerTug, nrtUnit: sizeCostPerTug > 0 ? '1 Unit' : '0 Units',
             fuelCost: fuelRatePerTug, fuelUnit: fuelRatePerTug > 0 ? '1 Unit' : '0 Units',
-            escortCost: escortDualCostPerTug, escortUnit: billedTimeDual.toFixed(1) + ' hrs' + discountText
+            escortCost: escortDualCostPerTug, escortUnit: billedTimeDual.toFixed(1) + ' hrs' + discountText,
+            serviceLabel: 'Escort'
         });
     }
     
@@ -461,7 +540,8 @@ function updateModel() {
             dockingCost: currentDockingRate, dockingUnit: '1 Unit',
             nrtCost: sizeCostPerTug, nrtUnit: sizeCostPerTug > 0 ? '1 Unit' : '0 Units',
             fuelCost: fuelRatePerTug, fuelUnit: fuelRatePerTug > 0 ? '1 Unit' : '0 Units',
-            escortCost: 0, escortUnit: '0.0 hrs'
+            escortCost: 0, escortUnit: '0.0 hrs',
+            serviceLabel: 'Escort'
         });
     }
     
@@ -471,7 +551,8 @@ function updateModel() {
             dockingCost: 0, dockingUnit: '0 Units',
             nrtCost: 0, nrtUnit: '0 Units',
             fuelCost: fuelRatePerTug, fuelUnit: fuelRatePerTug > 0 ? '1 Unit' : '0 Units',
-            escortCost: escortOnlyCostPerTug, escortUnit: billedTimeOnly.toFixed(1) + ' hrs' + discountText
+            escortCost: escortOnlyCostPerTug, escortUnit: billedTimeOnly.toFixed(1) + ' hrs' + discountText,
+            serviceLabel: 'Escort'
         });
     }
     
@@ -500,7 +581,7 @@ function updateModel() {
                     <span style="flex: 1; text-align: right;">${formatMoney(tug.fuelCost)}</span>
                 </div>
                 <div style="display: flex; justify-content: space-between; font-size: 0.8rem; font-weight: 600; color: var(--text-main);">
-                    <span style="flex: 1;">Escort</span>
+                    <span style="flex: 1;">${tug.serviceLabel}</span>
                     <span style="flex: 1; text-align: center; color: var(--text-muted); font-weight: 400;">${tug.escortUnit}</span>
                     <span style="flex: 1; text-align: right;">${formatMoney(tug.escortCost)}</span>
                 </div>
@@ -736,6 +817,8 @@ async function extractInvoiceDataFromPDF(file) {
                     } else if (lowerText.includes('virginia international gateway') || lowerText.includes('vig') || lowerText.includes('apm')) {
                         destValue = 'USORF03';
                     }
+                } else if (regionValue === 'savannah') {
+                    destValue = 'USSAV01';
                 }
 
                 const invoiceData = {
@@ -756,7 +839,6 @@ async function extractInvoiceDataFromPDF(file) {
                 let possibleTugName = "Unknown Tug";
                 
                 for (let line of lines) {
-                    // Upgraded regex to intelligently capture negative values like discounts (e.g. Discount 5,832.00 (25%) ($1,458.00))
                     const itemMatch = line.match(/(.*?)\s+([\d\.,]+)\s+\(?([\d,]+%?)\)?\s+\(?\$([\d,]+\.\d{2})\)?/);
                     
                     if (itemMatch) {
@@ -788,23 +870,27 @@ async function extractInvoiceDataFromPDF(file) {
                         
                     } else {
                         let cleanLine = line.trim();
+                        let lowerLine = cleanLine.toLowerCase();
                         
-                        // Heuristics to capture a new tug name. If it's a valid tug name and we have an existing tug, close the existing one.
+                        // Strict check to prevent standalone edge-case lines like '+ Runtimes' from becoming a tug name
                         if (cleanLine.length > 2 && cleanLine.length < 35 && 
                             !cleanLine.includes('$') && !cleanLine.match(/\d/) && 
-                            !cleanLine.toLowerCase().includes('description') &&
-                            !cleanLine.toLowerCase().includes('fuel') &&
-                            !cleanLine.toLowerCase().includes('moran new york') &&
-                            !cleanLine.toLowerCase().includes('moran norfolk') &&
-                            !cleanLine.toLowerCase().includes('moran charleston') &&
-                            !cleanLine.toLowerCase().includes('moran savannah') &&
-                            !cleanLine.toLowerCase().includes('moran miami') &&
-                            !cleanLine.toLowerCase().includes('moran new orleans') &&
-                            !cleanLine.toLowerCase().includes('division') &&
-                            !cleanLine.toLowerCase().includes('invoice') &&
-                            !cleanLine.toLowerCase().includes('undocking') &&
-                            !cleanLine.toLowerCase().includes('docking') &&
-                            !cleanLine.toLowerCase().includes('amount due')) {
+                            !cleanLine.startsWith('+') && !cleanLine.startsWith('-') &&
+                            !lowerLine.includes('description') &&
+                            !lowerLine.includes('runtime') && 
+                            !lowerLine.includes('discount') &&
+                            !lowerLine.includes('fuel') &&
+                            !lowerLine.includes('moran new york') &&
+                            !lowerLine.includes('moran norfolk') &&
+                            !lowerLine.includes('moran charleston') &&
+                            !lowerLine.includes('moran savannah') &&
+                            !lowerLine.includes('moran miami') &&
+                            !lowerLine.includes('moran new orleans') &&
+                            !lowerLine.includes('division') &&
+                            !lowerLine.includes('invoice') &&
+                            !lowerLine.includes('undocking') &&
+                            !lowerLine.includes('docking') &&
+                            !lowerLine.includes('amount due')) {
                             
                             if (currentTug && currentTug.items.length > 0) {
                                 invoiceData.tugs.push(currentTug);
@@ -886,7 +972,7 @@ function processInvoiceAudit(extractedData) {
     const bounds = getRangeBoundaries(vClass);
     const median = bounds.medState;
 
-    let extDockingOnly = 0, extEscortDocking = 0, extEscortOnly = 0;
+    let extDockingOnly = 0, extEscortDocking = 0, extEscortOnly = 0, extAssistOnly = 0;
     let extMaxTimeDual = 0, extMaxTimeOnly = 0;
 
     let invoiceDockingRates = new Set();
@@ -895,7 +981,7 @@ function processInvoiceAudit(extractedData) {
     let tetheredRate = 0;
 
     extractedData.tugs.forEach(tug => {
-        let hasDocking = false, hasEscort = false, billedTime = 0;
+        let hasDocking = false, hasEscort = false, hasAssist = false, billedTime = 0;
         tug.items.forEach(item => {
             let descLower = item.desc.toLowerCase();
             if ((descLower.includes('docking') && !descLower.includes('escort')) || descLower.includes('undocking')) {
@@ -911,6 +997,9 @@ function processInvoiceAudit(extractedData) {
                     tetheredRate = item.rate;
                 }
             }
+            if (descLower.includes('assistance') || descLower.includes('assist')) {
+                hasAssist = true;
+            }
         });
         
         if (hasDocking && hasEscort) {
@@ -921,6 +1010,8 @@ function processInvoiceAudit(extractedData) {
         } else if (hasEscort) {
             extEscortOnly++;
             extMaxTimeOnly = Math.max(extMaxTimeOnly, billedTime);
+        } else if (hasAssist) {
+            extAssistOnly++; 
         }
     });
 
@@ -958,7 +1049,7 @@ function processInvoiceAudit(extractedData) {
     
     let expectedFuelFee = 0;
     if (extractedData.fuel > 2.00) {
-        const increments = Math.ceil(Math.round((extractedData.fuel - 2.00) * 100) / 10);
+        const increments = Math.ceil(parseFloat((extractedData.fuel - 2.00).toFixed(2)) / 0.10);
         expectedFuelFee = increments * 15;
     }
 
@@ -980,11 +1071,23 @@ function processInvoiceAudit(extractedData) {
 
     let summaryBullets = [];
     
-    let physicalTugDiff = (extDockingOnly + extEscortDocking + extEscortOnly) - (median.dockingOnly + median.escortDocking + median.escortOnly);
+    let physicalTugDiff = (extDockingOnly + extEscortDocking + extEscortOnly + extAssistOnly) - (median.dockingOnly + median.escortDocking + median.escortOnly);
     if (physicalTugDiff > 0) {
-        summaryBullets.push(`<strong>Fleet Variance:</strong> The invoice billed ${physicalTugDiff} additional physical tug(s) compared to the ${vClass} standard. This is likely an extra safety docking tug. Confirm arrangement with agent.`);
+        summaryBullets.push(`<strong>Fleet Variance:</strong> The invoice billed ${physicalTugDiff} additional physical tug(s) compared to the ${vClass} standard. Verify the operational necessity with the agent.`);
     } else if (physicalTugDiff < 0) {
         summaryBullets.push(`<strong>Fleet Variance:</strong> The invoice billed ${Math.abs(physicalTugDiff)} fewer physical tug(s) than expected for a ${vClass} vessel.`);
+    }
+
+    // Calculate total assist costs for the summary bullet
+    let totalAssistCost = 0;
+    extractedData.tugs.forEach(t => t.items.forEach(i => {
+        if (i.desc.toLowerCase().includes('assistance') || i.desc.toLowerCase().includes('assist')) {
+            totalAssistCost += i.amount;
+        }
+    }));
+
+    if (totalAssistCost > 0) {
+        summaryBullets.push(`<strong>Situational Service Flag:</strong> The invoice includes 'Assistance' charges totaling <span style="color: var(--warning); font-weight: bold;">${formatMoney(totalAssistCost)}</span>. Assisting services are non-standard situational exceptions not defined by predictive contract rates. Please verify the operational necessity directly with the agent.`);
     }
 
     // Rate Variances
@@ -1106,7 +1209,7 @@ function processInvoiceAudit(extractedData) {
             </div>
         `;
 
-        let hasDocking = false, hasEscort = false;
+        let hasDocking = false, hasEscort = false, hasAssist = false;
         tug.items.forEach(item => {
             let descLower = item.desc.toLowerCase();
             if ((descLower.includes('docking') && !descLower.includes('escort')) || descLower.includes('undocking')) hasDocking = true;
@@ -1121,10 +1224,16 @@ function processInvoiceAudit(extractedData) {
             
             // Expected mappings
             if (descLower.includes('discount')) {
-                let expTime = (hasDocking && hasEscort) ? expectedBilledTimeDual : expectedBilledTimeOnly;
-                expectedAmount = (extractedData.region !== 'nynj') ? -(expTime * finalEscortRate * 0.25) : 0;
-                expectedQty = item.qty;
-                reasonText = `<div style="font-size: 0.7rem; color: var(--success); margin-top: 2px;">Expected 25% Contract Discount on Escort/Detention.</div>`;
+                // If it's a massive quantity or standard 25%, it's likely a total flat dollar amount being discounted
+                if (item.qty > 100 || item.rate === 25) {
+                    expectedAmount = -(item.qty * 0.25);
+                    expectedQty = item.qty;
+                    reasonText = `<div style="font-size: 0.7rem; color: var(--success); margin-top: 2px;">Expected 25% Contract Discount applied to total.</div>`;
+                } else {
+                    let expTime = (hasDocking && hasEscort) ? expectedBilledTimeDual : expectedBilledTimeOnly;
+                    expectedAmount = (extractedData.region !== 'nynj') ? -(expTime * finalEscortRate * 0.25) : 0;
+                    expectedQty = item.qty;
+                }
             }
             else if ((descLower.includes('docking') && !descLower.includes('escort')) || descLower.includes('undocking')) { 
                 expectedAmount = yearRate; expectedQty = 1; 
@@ -1138,6 +1247,12 @@ function processInvoiceAudit(extractedData) {
             else if (descLower.includes('fuel surcharge')) { 
                 expectedAmount = expectedFuelFee; expectedQty = 1; 
             } 
+            else if (descLower.includes('assistance') || descLower.includes('assist')) {
+                // Assistance is non-standard. Expect 0, which correctly throws a warning FAIL badge.
+                expectedAmount = 0; 
+                expectedQty = 0; 
+                reasonText = `<div style="font-size: 0.7rem; color: var(--warning); margin-top: 2px;">Assisting service is a non-standard situational exception (no contract rate). Verify with agent.</div>`;
+            }
             else if (descLower.includes('escort') || descLower.includes('detention')) {
                 let expTime = (hasDocking && hasEscort) ? expectedBilledTimeDual : expectedBilledTimeOnly;
                 expectedAmount = expTime * finalEscortRate; expectedQty = expTime; // Full rate expected, discount handled in its own line
@@ -1161,7 +1276,7 @@ function processInvoiceAudit(extractedData) {
                 badgeHtml = `<span style="background: #e8f5e9; color: var(--success); border: 1px solid #c8e6c9; padding: 2px 6px; border-radius: 4px; font-size: 0.65rem; font-weight: bold; margin-left: 10px; display: inline-block;">PASS</span>`;
             }
 
-            let unitLabel = (descLower.includes('time') || descLower.includes('escort') || descLower.includes('runtimes') || descLower.includes('detention')) ? 'hrs' : 'units';
+            let unitLabel = (descLower.includes('time') || descLower.includes('escort') || descLower.includes('runtimes') || descLower.includes('detention') || descLower.includes('assistance') || descLower.includes('assist')) ? 'hrs' : 'units';
             
             html += `
             <div style="display: flex; justify-content: space-between; align-items: flex-start; font-size: 0.85rem; margin-bottom: 0.8rem; color: var(--text-main);">

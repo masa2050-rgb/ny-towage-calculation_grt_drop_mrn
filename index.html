@@ -132,6 +132,61 @@
                     <span style="left: 100%">150k</span>
                 </div>
             </div>
+
+            <div class="slider-group" id="teu-group" style="display: none;">
+                <div class="slider-header">
+                    <span class="slider-title">Capacity (TEU)</span>
+                    <span class="slider-value" id="teu-val">11,000</span>
+                </div>
+                <input type="range" id="teu" min="1000" max="24000" step="100" value="11000" oninput="updateModel()">
+                <div class="slider-ticks">
+                    <span style="left: 0%">1k</span>
+                    <span style="left: 50%">11k</span>
+                    <span style="left: 100%">24k</span>
+                </div>
+            </div>
+
+            <div class="slider-group" id="beam-group" style="display: none;">
+                <div class="slider-header">
+                    <span class="slider-title">Beam (ft)</span>
+                    <span class="slider-value" id="beam-val">158</span>
+                </div>
+                <input type="range" id="beam" min="100" max="200" step="1" value="158" oninput="updateModel()">
+                <div class="slider-ticks">
+                    <span style="left: 0%">100'</span>
+                    <span style="left: 42%">142'</span>
+                    <span style="left: 68%">168'</span>
+                    <span style="left: 100%">200'</span>
+                </div>
+            </div>
+
+            <div class="slider-group" id="loa-group" style="display: none;">
+                <div class="slider-header">
+                    <span class="slider-title">Length Overall (LOA ft)</span>
+                    <span class="slider-value" id="loa-val">1,000</span>
+                </div>
+                <input type="range" id="loa" min="500" max="1400" step="10" value="1000" oninput="updateModel()">
+                <div class="slider-ticks">
+                    <span style="left: 0%">500'</span>
+                    <span style="left: 55%">1000'</span>
+                    <span style="left: 100%">1400'</span>
+                </div>
+            </div>
+
+            <div class="slider-group" id="draft-group" style="display: none;">
+                <div class="slider-header">
+                    <span class="slider-title">Draft (ft)</span>
+                    <span class="slider-value" id="draft-val">42.0</span>
+                </div>
+                <input type="range" id="draft" min="30" max="50" step="0.1" value="42.0" oninput="updateModel()">
+            </div>
+            
+            <div id="savannah-restrictions" style="display: none; margin-top: 1rem; padding: 1rem; background: #fff3cd; border: 1px solid #ffe082; border-radius: 6px; font-size: 0.8rem; color: #d84315;">
+                <strong>Savannah Transit Guidelines:</strong>
+                <p id="sav-draft-rule" style="margin-top: 0.5rem;"></p>
+                <p id="sav-wind-rule" style="margin-top: 0.5rem;"></p>
+            </div>
+
         </div>
 
         <div class="panel panel-center-left">
@@ -155,11 +210,11 @@
                     <span class="slider-title">Escort Hourly Rate ($/hr)</span>
                     <span class="slider-value" id="escort-rate-val">$1,000/hr</span>
                 </div>
-                <input type="range" id="escortRate" min="0" max="2500" step="1" value="1000" oninput="updateModel()">
+                <input type="range" id="escortRate" min="0" max="4000" step="1" value="1000" oninput="updateModel()">
                 <div class="slider-ticks">
                     <span style="left: 0%">$0</span>
-                    <span style="left: 40%">$1k</span>
-                    <span style="left: 100%">$2.5k</span>
+                    <span style="left: 25%">$1,000</span>
+                    <span style="left: 100%">$4,000</span>
                 </div>
             </div>
 
@@ -230,7 +285,7 @@
                 </div>
             </div>
 
-            <div class="sys-param-row" style="align-items: center;">
+            <div class="sys-param-row" style="align-items: center; margin-top: 1rem;">
                 <span title="Input the actual escort time for standard escort+docking tugs">Actual Escort Time
                     (hrs)</span>
                 <div class="stepper">
@@ -252,7 +307,7 @@
             </div>
 
             <div class="sys-param-row" style="align-items: center; margin-top: 1rem;">
-                <span title="Input the actual escort time specifically for Escort Only tugs">Actual Escort Only Time (hrs)</span>
+                <span title="Input the actual escort time specifically for Escort Only / Assist tugs">Actual E/A Only Time (hrs)</span>
                 <div class="stepper">
                     <button type="button" class="stepper-btn" onclick="stepTimeValue('adjTimeOnly', -0.25)">&minus;</button>
                     <span class="stepper-val" id="adjTimeOnly-display" style="min-width: 2.5rem;">0.50</span>
@@ -262,7 +317,7 @@
             </div>
 
             <div class="sys-param-row" style="align-items: center; padding-left: 1rem; border-left: none;">
-                <span title="Adjust the baseline runtime (Zone Time) for Escort Only tugs">↳ Plus Runtimes</span>
+                <span title="Adjust the baseline runtime (Zone Time) for Escort Only / Assist tugs">↳ Plus Runtimes</span>
                 <div class="stepper">
                     <button type="button" class="stepper-btn" onclick="stepTimeValue('adjRuntimeOnly', -0.25)">&minus;</button>
                     <span class="stepper-val" id="adjRuntimeOnly-display" style="min-width: 2.5rem;">2.50</span>
