@@ -59,7 +59,6 @@ body {
 /* Container */
 .container {
     display: grid;
-    /* Adjusted columns to fit the new panel order: Baseline | Rates | Financial | Unit Output */
     grid-template-columns: 1.1fr 1fr 280px 320px;
     gap: 1.5rem;
     max-width: 1400px;
@@ -176,14 +175,14 @@ select:focus {
 
 input[type=range] {
     -webkit-appearance: none;
-    appearance: none; /* NEW: Fixes the VS Code compatibility warning */
+    appearance: none; 
     width: 100%;
     background: transparent;
 }
 
 input[type=range]::-webkit-slider-thumb {
     -webkit-appearance: none;
-    appearance: none; /* NEW: Fixes the VS Code compatibility warning */
+    appearance: none; 
     height: 18px;
     width: 18px;
     border-radius: 50%;
@@ -362,84 +361,30 @@ input[type=range]::-webkit-slider-thumb {
 }
 
 /* =========================================
-   Range / Error Bar Chart Styles
+   Range Chart Baseline Styles (Used Inline)
    ========================================= */
-.range-chart-container {
-    background: var(--panel-bg);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    padding: 2.5rem 2rem 1.5rem 2rem;
-    box-shadow: var(--shadow);
-}
-
-.range-row {
-    display: flex;
-    align-items: center;
-    margin-bottom: 3.5rem;
-}
-
-.range-row:last-of-type {
-    margin-bottom: 1.5rem;
-}
-
-.range-label-col {
-    width: 200px;
-    font-weight: 700;
-    font-size: 0.85rem;
-    color: var(--accent);
-    padding-right: 1rem;
-}
-
-.range-track-col {
-    flex: 1;
-    position: relative;
-    height: 12px;
-}
-
-.range-line {
-    position: absolute;
-    top: 4px;
-    left: 0;
-    right: 0;
-    height: 4px;
-    background: #e8e4db; /* Light grey track */
-    border-radius: 2px;
-}
-
-.range-fill {
-    position: absolute;
-    top: 2px;
-    height: 8px;
-    background: var(--accent-light); /* Blue fill representing the range */
-    border-radius: 4px;
-    z-index: 1;
-}
 
 .range-point {
     position: absolute;
-    top: -4px;
     width: 2px;
-    height: 20px;
     background: var(--accent);
     z-index: 2;
 }
 
 .range-median {
     position: absolute;
-    top: 0px;
-    width: 12px;
-    height: 12px;
     background: #ffcc00;
     border: 2px solid var(--accent);
     border-radius: 50%;
+    width: 14px;
+    height: 14px;
+    top: -6px;
     transform: translateX(-50%);
-    z-index: 3;
+    z-index: 5;
 }
 
 .range-val {
     position: absolute;
-    top: 22px; /* Minimum and Maximum text sits below the line */
-    transform: translateX(-50%);
     font-size: 0.75rem;
     font-family: var(--font-mono);
     color: var(--text-muted);
@@ -447,104 +392,8 @@ input[type=range]::-webkit-slider-thumb {
 }
 
 .range-val.median-val {
-    font-weight: 700;
+    font-weight: 1700;
     color: var(--accent);
-    top: -24px; /* Median text sits above the line so they don't overlap */
-}
-
-/* Axis & Legend */
-.range-axis {
-    position: relative;
-    height: 20px;
-    margin-left: 200px; /* Offset to match the label column width */
-    border-top: 1px dashed var(--border);
-    margin-top: 1rem;
-    padding-top: 0.5rem;
-}
-
-.range-axis span {
-    position: absolute;
-    transform: translateX(-50%);
-    font-size: 0.7rem;
-    color: var(--text-light);
-    font-family: var(--font-mono);
-}
-
-.range-axis span:first-child {
-    transform: none;
-}
-
-.range-axis span:last-child {
-    transform: translateX(-100%);
-}
-
-.range-legend {
-    display: flex;
-    justify-content: center;
-    gap: 2rem;
-    margin-top: 2.5rem;
-    font-size: 0.75rem;
-    color: var(--text-muted);
-}
-
-.legend-item {
-    display: flex;
-    align-items: center;
-    gap: 0.4rem;
-}
-
-.legend-color {
-    width: 20px;
-    height: 8px;
-    border-radius: 4px;
-    background: var(--accent-light);
-}
-
-.legend-dot {
-    width: 12px;
-    height: 12px;
-    background: #ffcc00;
-    border: 2px solid var(--accent);
-    border-radius: 50%;
-}
-
-/* Breakdown Grid Styles */
-.breakdown-grid {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 2.5rem;
-}
-
-.breakdown-group {
-    margin-bottom: 0rem;
-}
-
-.breakdown-group h3 {
-    font-size: 0.95rem;
-    color: var(--accent);
-    border-bottom: 2px solid var(--border-light);
-    padding-bottom: 0.5rem;
-    margin-bottom: 2rem;
-}
-
-.dense-row {
-    margin-bottom: 2.5rem;
-}
-
-.dense-row:last-of-type {
-    margin-bottom: 1rem;
-}
-
-.dense-row .range-label-col {
-    width: 140px; /* Expanded to properly fit text */
-    font-size: 0.8rem;
-    font-weight: 600;
-    color: var(--text-main);
-    line-height: 1.2;
-}
-
-.mini-axis {
-    margin-left: 140px;
 }
 
 /* =========================================
@@ -635,4 +484,35 @@ input[type=range]::-webkit-slider-thumb {
     background: #e3f2fd;
     color: var(--accent-light);
     border: 1px solid #bbdefb;
+}
+
+/* =========================================
+   Split View Grid (Expected vs Actual)
+   ========================================= */
+.split-view-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1.5rem;
+    align-items: stretch; /* Modified to automatically match row heights */
+    margin-top: 1.5rem;
+    grid-column: 1 / -1;
+}
+
+@media (max-width: 1024px) {
+    .split-view-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+/* =========================================
+   Mermaid Styles
+   ========================================= */
+.mermaid {
+    width: 100%;
+    text-align: center;
+}
+
+.mermaid svg {
+    max-width: 100%;
+    height: auto;
 }
